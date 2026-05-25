@@ -1,24 +1,18 @@
-from typing import Optional
-
 from llama_index.core import Settings as LlamaSettings
-from llama_index.llms.openai import OpenAI
-
-from app.core.config import settings
-
-_llm: Optional[OpenAI] = None
+from llama_index.llms.zhipuai import ZhipuAI
+from app.core.settings import settings
 
 
-def get_llm() -> OpenAI:
-    global _llm
-    if _llm is None:
-        kwargs = dict(
-            model=settings.llm.model,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            api_key=settings.llm.api_key,
-        )
-        if settings.llm.api_base:
-            kwargs["api_base"] = settings.llm.api_base
-        _llm = OpenAI(**kwargs)
-        LlamaSettings.llm = _llm
-    return _llm
+def get_llm():
+    if not settings.llm_api_key:
+        raise ValueError("LLM API key not configured")
+
+    llm = ZhipuAI(
+        api_key=settings.llm_api_key,
+        model=settings.llm_model,
+    )
+    LlamaSettings.llm = llm
+    return llm
+
+
+__all__ = ["get_llm"]

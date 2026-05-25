@@ -1,27 +1,18 @@
-app:
-  name: "attend-agent"
-  host: "0.0.0.0"
-  port: 8000
-  debug: true
-
-mysql:
-  host: "127.0.0.1"
-  port: 3306
-  user: "root"
-  password: ""
-  database: "attend_agent"
-  pool_size: 10
+database:
+  url: "jdbc:mysql://192.168.31.100:3306/attend"
+  username: "root"
+  password: "root123"
+  driver-class-name: "com.mysql.cj.jdbc.Driver"
 
 redis:
-  host: "127.0.0.1"
+  host: "192.168.31.100"
   port: 6379
-  db: 0
-  password: null
+  password: "123456"
 
 llm:
-  provider: "openai"
-  model: "gpt-4o-mini"
-  api_key: ""
-  api_base: null
-  temperature: 0.0
-  max_tokens: 4096
+  api-key: "d339f3a4b51d41dc9c4a78a43c4564bd.WZuTMmNxMIqmYyEC"
+  model: "GLM-4.5-Air"
+  api-base: "https://open.bigmodel.cn/api/paas/v4/"
+
+attend:
+  base-url: "http://localhost:8080"
