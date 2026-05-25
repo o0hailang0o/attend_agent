@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from llama_index.core.llms import ChatMessage, MessageRole
 
 from app.core.config import settings
 from app.core.llama_index import get_llm
+from app.core.prompts import SYSTEM_PROMPT
 from app.services.function_calling import get_available_tools
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -51,9 +53,11 @@ async def chat(req: ChatRequest):
         tools = list(get_available_tools())
         tool_map = {t.metadata.name: t for t in tools}
 
+        chat_history = [ChatMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT)]
         response = llm.chat_with_tools(
             tools,
             user_msg=req.message,
+            chat_history=chat_history,
         )
 
         called: list[str] = []
