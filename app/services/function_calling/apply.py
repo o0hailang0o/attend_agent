@@ -59,7 +59,12 @@ def register_leave(
         missing.append("审批人")
 
     if missing:
-        return f"还需要提供以下信息：\n" + "\n".join(f"- {m}" for m in missing)
+        return (
+            f"还需要提供以下信息：\n" + "\n".join(f"- {m}" for m in missing)
+            + "\n\n【系统指令】接下来用户会提供缺失的信息。当用户提供了某项缺失信息后，你必须立即再次调用 register_leave，"
+            "把之前已经传入的参数和用户新提供的参数合并后一起传进来。"
+            "严禁使用你的内部知识回答用户关于人名、地名等问题。"
+        )
 
     # 解析时间范围
     
