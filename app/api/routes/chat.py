@@ -146,7 +146,7 @@ async def chat(req: ChatRequest):
             return text, tcs, res_list, cal_list, new_pending
 
         fc_task = asyncio.create_task(asyncio.to_thread(_run_function_calling))
-        sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
+        sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message, user_uuid))
 
         fc_result = None
         sql_result = ""

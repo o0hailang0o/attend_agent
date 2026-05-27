@@ -11,7 +11,7 @@ SCHEMA_DESCRIPTION = """
 数据库 `attend` 中的核心表结构：
 
 1. sys_user — 系统用户
-   uuid, name, account(工号), work_num(备用工号), dept_uuid, dept_name, position, is_delete(1=正常,0=删除)
+   uuid, name, account(工号), work_num(备用工号), dept_uuid（部门uuid 与 dept表的uuid相关联）, dept_name（部门名称）, position, is_delete(1=正常,0=删除)
 
 2. daily_attendance — 每日考勤统计
    uuid, employee_uuid, employee_name, date(日期), clock_in(上班时间), clock_out(下班时间),
@@ -30,10 +30,10 @@ SCHEMA_DESCRIPTION = """
    reject(驳回原因), status(0删除 3驳回 4待审批 5审批中 9审批完成)
 
 5. leave_balance — 假期余额
-   uuid, user_uuid, year(年度), annual_remaining_hours(年假剩余小时), comp_remaining_hours(调休假剩余小时)
+   uuid, user_uuid(员工uuid  关联 sys_user字段uuid), year(年度), annual_remaining_hours(年假剩余小时), comp_remaining_hours(调休假剩余小时)
 
 6. leader — 公司领导审批链
-   leader_uuid(领导用户uuid), leader_name(姓名), level(级别)
+   leader_uuid(领导用户uuid 关联 sys_user表的uuid字段), leader_name(姓名), level(级别)
 
 7. dept — 部门
    uuid, name(部门名称), parent_uuid(上级部门)
@@ -44,12 +44,12 @@ SCHEMA_DESCRIPTION = """
 9. rule — 考勤规则
    uuid, name(规则名称), start_time(上班时间), end_time(下班时间)
 
-10. door_access — 门禁开门记录
-    uuid, employee_uuid, employee_name, work_num(工号), door_no(门号),
+10. door_access — 门禁开门记录, 打卡记录
+    uuid（主键uuid）, employee_uuid（员工uuid 关联 sys_user表的 uuid）, employee_name（员工姓名）, work_num(工号), door_no(门号),
     direction(0进 1出), access_time(通行时间), access_date(通行日期)
 
 11. leave_type — 假期类型
-    uuid, name(假期类型名称), deduct_balance(是否扣减余额)
+    uuid（逐渐uuid）, name(假期类型名称), deduct_balance(是否扣减余额)
 
 注意：
 - 所有表都有 is_delete 字段，查询时默认过滤 is_delete = 1
@@ -80,7 +80,7 @@ def _generate_sql(query: str) -> str:
     # 错峰启动，降低与主 LLM 同时调用的速率限制冲突
     time.sleep(1.5)
 
-    for attempt in range(3):
+    for attempt in range(1):
         try:
             r = llm.chat(messages=[msg])
             sql = (r.message.content or "").strip()
@@ -124,11 +124,19 @@ def _execute_sql(sql: str) -> str:
         return f"SQL 执行出错: {e}"
 
 
-def text_to_sql(query: str) -> str:
+def text_to_sql(query: str, user_uuid: str = None) -> str:
     """执行 text-to-sql 流程：LLM 生成 SQL → 执行 → 返回结果"""
-    logger.info("text_to_sql 开始处理: %s", query)
+    logger.info("text_to_sql 开始处理: query=%s, user_uuid=%s", query, user_uuid[:8] if user_uuid else None)
     try:
-        sql = _generate_sql(query)
+        llm = get_text_to_sql_llm()
+        prompt = SQL_GENERATION_PROMPT.format(query=query)
+        if user_uuid:
+            prompt += f"\n当前用户的 UUID 是 {user_uuid}。请在 SQL 中使用此 UUID 过滤相关记录。"
+        msg = ChatMessage(role=MessageRole.USER, content=SCHEMA_DESCRIPTION + "\n\n" + prompt)
+        r = llm.chat(messages=[msg])
+        sql = (r.message.content or "").strip()
+        sql = sql.removeprefix("```sql").removeprefix("```").removesuffix("```").strip()
+        logger.info("生成的 SQL: %s", sql)
         if not sql:
             logger.info("text_to_sql 未生成 SQL，跳过")
             return ""
@@ -141,3 +149,8 @@ def text_to_sql(query: str) -> str:
     except Exception as e:
         logger.warning("text_to_sql 整体异常: %s", str(e))
         return ""
+
+if __name__ == '__main__':
+    sql = _generate_sql("最后一次打卡")
+    print(sql)
+    
