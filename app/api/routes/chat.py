@@ -159,17 +159,20 @@ async def chat(req: ChatRequest):
 
         fc_reply, tool_calls, results, called, new_pending = fc_result
 
-        if sql_task.done():
-            try:
-                sql_result = sql_task.result() or ""
-            except Exception as e:
-                logger.warning("text-to-sql 异常: %s", e)
-                sql_result = ""
-            if isinstance(sql_result, BaseException):
-                sql_result = ""
-
         if new_pending:
             pending_tool_call.set(new_pending)
+
+        # text-to-sql 已在后台并行运行，给它额外时间完成
+        try:
+            sql_result = await asyncio.wait_for(sql_task, timeout=10)
+        except asyncio.TimeoutError:
+            logger.info("text-to-sql 超过 10 秒未完成，跳过")
+            sql_result = ""
+        except Exception as e:
+            logger.warning("text-to-sql 异常: %s", e)
+            sql_result = ""
+        if isinstance(sql_result, BaseException):
+            sql_result = ""
 
         # ---- 合成最终回复 ----
         if tool_calls:
