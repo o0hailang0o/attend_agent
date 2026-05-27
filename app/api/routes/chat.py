@@ -61,17 +61,6 @@ def _mock_chat(message: str) -> str:
     )
 
 
-def _parse_intent(text: str) -> str:
-    """从 LLM 输出中解析 INTENT 行，返回 READ / WRITE / 空字符串"""
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if line.startswith("INTENT:"):
-            val = line[len("INTENT:"):].strip().upper()
-            if val in ("READ", "WRITE"):
-                return val
-    return ""
-
-
 def _parse_tool_calls(text: str) -> list[dict]:
     calls = []
     for line in text.strip().split("\n"):
@@ -140,12 +129,8 @@ async def chat(req: ChatRequest):
         called = []
         tool_calls = _parse_tool_calls(reply_text)
 
-        # 用自然语言判断读/写（LLM 输出 INTENT: 行），无 INTENT 时 fallback 到工具名判断
-        intent = _parse_intent(reply_text)
-        if intent:
-            is_write = intent == "WRITE"
-        else:
-            is_write = any(tc.get("tool", "") in WRITE_TOOLS for tc in tool_calls)
+        # 判断是否有写操作（修改数据的工具调用）
+        is_write = any(tc.get("tool", "") in WRITE_TOOLS for tc in tool_calls)
 
         if tool_calls:
             results = []
