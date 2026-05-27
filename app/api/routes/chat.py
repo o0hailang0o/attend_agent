@@ -1,4 +1,4 @@
-import logging, json
+import logging, json, asyncio
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -11,6 +11,7 @@ from app.services.function_calling import get_available_tools
 from app.services.chat_memory import load_history, save_message
 from app.services import agent_service
 from app.context import auth_token, current_user_uuid, pending_tool_call
+from app.services.text_to_sql import text_to_sql as run_text_to_sql
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,16 @@ async def chat(req: ChatRequest):
         called = []
         tool_calls = _parse_tool_calls(reply_text)
 
+        # 并行执行 text-to-sql（异步线程，不阻塞）
+        sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
+
+        async def _await_sql():
+            try:
+                return await sql_task
+            except Exception as e:
+                logger.warning("text-to-sql 异常: %s", str(e))
+                return ""
+
         if tool_calls:
             results = []
             for tc in tool_calls:
@@ -146,6 +157,14 @@ async def chat(req: ChatRequest):
                         "result": result,
                     })
 
+            # 等 text-to-sql 完成
+            sql_result = await _await_sql()
+
+            # 合并工具结果 + SQL 结果
+            all_results = list(results)
+            if sql_result:
+                all_results.append(sql_result)
+
             # 将工具调用信息存入历史，供下一轮 LLM 参考
             for tc in tool_calls:
                 name = tc.get("tool", "")
@@ -155,17 +174,22 @@ async def chat(req: ChatRequest):
                     agent_service.save_message(session_id, "assistant", record)
                 else:
                     await save_message(user_uuid, "assistant", record)
-            for r in results:
+            for r in all_results:
                 if session_id:
                     agent_service.save_message(session_id, "assistant", r)
                 else:
                     await save_message(user_uuid, "assistant", r)
 
-            final_prompt = TOOL_RESULT_PROMPT.format(question=req.message, results="\n".join(results))
+            final_prompt = TOOL_RESULT_PROMPT.format(question=req.message, results="\n".join(all_results))
             final = llm.chat(_build_messages(history, RESULT_SYSTEM_PROMPT, final_prompt))
             reply = (final.message.content or "").strip()
         else:
-            reply = reply_text
+            # 没有工具调用，尝试用 text-to-sql 补充
+            sql_result = await _await_sql()
+            if sql_result:
+                reply = reply_text + "\n\n" + sql_result
+            else:
+                reply = reply_text
 
         if not reply:
             reply = _mock_chat(req.message)
