@@ -1,5 +1,5 @@
 import logging
-import json
+import time
 import traceback
 from llama_index.core.llms import ChatMessage, MessageRole
 from app.core.llama_index import get_text_to_sql_llm
@@ -72,19 +72,31 @@ SQL："""
 
 
 def _generate_sql(query: str) -> str:
-    """使用 LLM 将自然语言转为 SQL"""
-    try:
-        llm = get_text_to_sql_llm()
-        prompt = SQL_GENERATION_PROMPT.format(query=query)
-        msg = ChatMessage(role=MessageRole.USER, content=SCHEMA_DESCRIPTION + "\n\n" + prompt)
-        r = llm.chat(messages=[msg])
-        sql = (r.message.content or "").strip()
-        sql = sql.removeprefix("```sql").removeprefix("```").removesuffix("```").strip()
-        logger.info("生成的 SQL: %s", sql)
-        return sql
-    except Exception as e:
-        logger.warning("SQL 生成失败: %s", str(e))
-        return ""
+    """使用 LLM 将自然语言转为 SQL（含重试）"""
+    llm = get_text_to_sql_llm()
+    prompt = SQL_GENERATION_PROMPT.format(query=query)
+    msg = ChatMessage(role=MessageRole.USER, content=SCHEMA_DESCRIPTION + "\n\n" + prompt)
+
+    # 错峰启动，降低与主 LLM 同时调用的速率限制冲突
+    time.sleep(1.5)
+
+    for attempt in range(3):
+        try:
+            r = llm.chat(messages=[msg])
+            sql = (r.message.content or "").strip()
+            sql = sql.removeprefix("```sql").removeprefix("```").removesuffix("```").strip()
+            logger.info("生成的 SQL: %s", sql)
+            return sql
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "rate limit" in err_str.lower():
+                wait = 3 * (attempt + 1)
+                logger.warning("速率限制（第 %d 次），等待 %ds 后重试", attempt + 1, wait)
+                time.sleep(wait)
+                continue
+            logger.warning("SQL 生成失败: %s", err_str)
+            break
+    return ""
 
 
 def _execute_sql(sql: str) -> str:
