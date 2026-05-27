@@ -114,10 +114,14 @@ def _execute_sql(sql: str) -> str:
 
 def text_to_sql(query: str) -> str:
     """执行 text-to-sql 流程：LLM 生成 SQL → 执行 → 返回结果"""
-    sql = _generate_sql(query)
-    if not sql:
+    try:
+        sql = _generate_sql(query)
+        if not sql:
+            return ""
+        result = _execute_sql(sql)
+        if not result:
+            return ""
+        return f"【数据库查询结果】\nSQL: {sql}\n\n{result}"
+    except Exception as e:
+        logger.warning("text_to_sql 整体异常: %s", str(e))
         return ""
-    result = _execute_sql(sql)
-    if not result:
-        return ""
-    return f"【数据库查询结果】\nSQL: {sql}\n\n{result}"

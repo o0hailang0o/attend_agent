@@ -126,12 +126,15 @@ async def chat(req: ChatRequest):
         called = []
         tool_calls = _parse_tool_calls(reply_text)
 
-        # 并行执行 text-to-sql（异步线程，不阻塞）
+        # 并行执行 text-to-sql（异步线程，不阻塞，10 秒超时）
         sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
 
         async def _await_sql():
             try:
-                return await sql_task
+                return await asyncio.wait_for(sql_task, timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning("text-to-sql 超时")
+                return ""
             except Exception as e:
                 logger.warning("text-to-sql 异常: %s", str(e))
                 return ""
