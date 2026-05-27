@@ -1,18 +1,19 @@
-import httpx
 from typing import Dict, Any, Optional
-from app.core.config import settings
+from .base import get_client, _to_dict
+
 
 class RuleController:
+    """考勤规则接口"""
+
     def __init__(self):
-        self.base_url = settings.attend_base_url or "http://localhost:8080"
-        self.client = httpx.Client(base_url=self.base_url)
-    
+        self.client = get_client()
+
     def get_attendance_rules(self) -> Dict:
-        """获取考勤规则"""
+        """获取考勤规则列表"""
         response = self.client.get("/rule")
-        return response.json()
-    
+        return _to_dict(response)
+
     def get_rule_details(self, rule_id: int) -> Dict:
-        """获取规则详细信息"""
+        """获取考勤规则详细信息"""
         response = self.client.get(f"/rule/{rule_id}")
-        return response.json()
+        return _to_dict(response)

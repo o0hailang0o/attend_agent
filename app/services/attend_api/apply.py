@@ -1,24 +1,56 @@
-import httpx
 from typing import Dict, Any, Optional
-from app.core.config import settings
+from .base import get_client, _to_dict
+
+
+_LEAVE_TYPE_MAP = {
+    "年假": 1,
+    "事假": 2,
+    "病假": 3,
+    "婚假": 4,
+    "产假": 5,
+    "丧假": 6,
+    "调休": 7,
+    "公休假": 7,
+}
+
+
+def map_leave_type(name: str) -> int:
+    """将请假类型中文名映射为 ApplyReq.type 整数值"""
+    return _LEAVE_TYPE_MAP.get(name, 2)
+
 
 class ApplyController:
+    """考勤申请接口（对接 attend POST /apply, GET /apply）"""
+
     def __init__(self):
-        self.base_url = settings.attend_base_url or "http://localhost:8080"
-        self.client = httpx.Client(base_url=self.base_url)
-    
+        self.client = get_client()
+
     def submit_leave_application(self, data: Dict) -> Dict:
-        """提交请假申请"""
+        """提交请假申请
+
+        字段映射到 ApplyReq (camelCase)：
+        - month:startTime当前月的1日 比如2025-05-24 17：56   month就等于2025-05-01
+        - type: 申请类型（Integer，见 map_leave_type）
+        - startTime: 开始时间（LocalDateTime, "yyyy-MM-ddTHH:mm:ss"）
+        - endTime: 结束时间（LocalDateTime）
+        - reason: 请假事由
+        - applyUserUuid: 申请人 uuid
+        - leaderUuid: 审批人 uuid（可选）
+
+        Args:
+            data: 包含 type/startTime/endTime/reason/applyUserUuid 的字典
+        """
         response = self.client.post("/apply", json=data)
-        return response.json()
-    
-    def get_leave_applications(self, employee_uuid: str = None, status: str = None) -> Dict:
-        """获取请假申请列表"""
-        params = {}
-        if employee_uuid:
-            params["employeeUuid"] = employee_uuid
-        if status:
-            params["status"] = status
-        
+        return _to_dict(response)
+
+    def get_leave_applications(self, user_uuid: str = None) -> Dict:
+        """获取请假申请列表
+
+        Args:
+            user_uuid: 申请人 uuid，为空时查当前用户
+        """
+        params = {"page": 1, "size": 50}
+        if user_uuid:
+            params["userUuid"] = user_uuid
         response = self.client.get("/apply", params=params)
-        return response.json()
+        return _to_dict(response)

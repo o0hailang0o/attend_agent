@@ -1,15 +1,13 @@
 from typing import Sequence
 from llama_index.core.tools import FunctionTool
 
-from typing import Sequence
-from llama_index.core.tools import FunctionTool
-
 from .daily_attendance import (
     get_employee_attendance,
     get_attendance_summary,
     get_overtime_records,
 )
-from .leave import register_leave, get_leave_balance
+from .apply import register_leave, get_leave_applications
+from .leave_balance import get_leave_balance
 from .sys_user import search_user
 from .door_access import get_door_access
 from .approve import approve_list, approve_pass, approve_reject
@@ -25,6 +23,7 @@ def get_available_tools() -> Sequence[FunctionTool]:
         FunctionTool.from_defaults(fn=get_attendance_summary),
         FunctionTool.from_defaults(fn=get_overtime_records),
         FunctionTool.from_defaults(fn=register_leave),
+        FunctionTool.from_defaults(fn=get_leave_applications),
         FunctionTool.from_defaults(fn=get_leave_balance),
         FunctionTool.from_defaults(fn=search_user),
         FunctionTool.from_defaults(fn=get_door_access),

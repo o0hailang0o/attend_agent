@@ -1,23 +1,24 @@
-import httpx
 from typing import Dict, Any, Optional
-from app.core.config import settings
+from .base import get_client, _to_dict
+
 
 class DeptController:
+    """部门管理接口"""
+
     def __init__(self):
-        self.base_url = settings.attend_base_url or "http://localhost:8080"
-        self.client = httpx.Client(base_url=self.base_url)
-    
+        self.client = get_client()
+
     def list_departments(self) -> Dict:
         """获取部门列表"""
         response = self.client.get("/dept")
-        return response.json()
-    
+        return _to_dict(response)
+
     def get_department_details(self, dept_id: int) -> Dict:
         """获取部门详细信息"""
         response = self.client.get(f"/dept/{dept_id}")
-        return response.json()
-    
+        return _to_dict(response)
+
     def get_department_members(self, dept_id: int) -> Dict:
-        """获取部门成员"""
+        """获取部门下的成员列表"""
         response = self.client.get(f"/dept/{dept_id}/members")
-        return response.json()
+        return _to_dict(response)
