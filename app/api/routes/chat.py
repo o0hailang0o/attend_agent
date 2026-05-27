@@ -74,11 +74,13 @@ def _parse_tool_calls(text: str) -> list[dict]:
 
 
 def _execute_tool(name: str, params: dict) -> str:
-    tools = list(get_available_tools())
-    for t in tools:
-        if t.metadata.name == name:
+    tools = {t.metadata.name: t for t in get_available_tools()}
+    if name in tools:
+        t = tools[name]
+        if hasattr(t, "__call__"):
             logger.info("执行工具: %s params=%s", name, params)
-            return t(**params)
+            r = t(**params)
+            return str(r) if not isinstance(r, str) else r
     return f"未找到工具: {name}"
 
 
