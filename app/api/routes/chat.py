@@ -13,6 +13,9 @@ from app.services import agent_service
 from app.context import auth_token, current_user_uuid, pending_tool_call
 from app.services.text_to_sql import text_to_sql as run_text_to_sql
 
+# 写操作工具（修改数据，不需要 text-to-sql）
+WRITE_TOOLS = {"register_leave", "approve_pass", "approve_reject"}
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -126,15 +129,8 @@ async def chat(req: ChatRequest):
         called = []
         tool_calls = _parse_tool_calls(reply_text)
 
-        # 并行执行 text-to-sql（异步线程，不阻塞）
-        sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
-
-        async def _await_sql():
-            try:
-                return await sql_task
-            except Exception as e:
-                logger.warning("text-to-sql 异常: %s", str(e))
-                return ""
+        # 判断是否有写操作（修改数据的工具调用）
+        is_write = any(tc.get("tool", "") in WRITE_TOOLS for tc in tool_calls)
 
         if tool_calls:
             results = []
@@ -147,7 +143,6 @@ async def chat(req: ChatRequest):
 
                 # 如果工具返回"还缺参数"，保存续接状态
                 if result.strip().startswith("还需要提供以下信息"):
-                    # 提取列举了哪些缺失项
                     missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
                     missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
                     pending_tool_call.set({
@@ -157,13 +152,18 @@ async def chat(req: ChatRequest):
                         "result": result,
                     })
 
-            # 等 text-to-sql 完成
-            sql_result = await _await_sql()
+            # 写操作不查 SQL，读操作并行执行 text-to-sql 补充数据
+            if not is_write:
+                sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
+                sql_result = ""
+                try:
+                    sql_result = await sql_task
+                except Exception as e:
+                    logger.warning("text-to-sql 异常: %s", str(e))
+                if sql_result:
+                    results.append(sql_result)
 
-            # 合并工具结果 + SQL 结果
-            all_results = list(results)
-            if sql_result:
-                all_results.append(sql_result)
+            all_results = results
 
             # 将工具调用信息存入历史，供下一轮 LLM 参考
             for tc in tool_calls:
@@ -184,8 +184,12 @@ async def chat(req: ChatRequest):
             final = llm.chat(_build_messages(history, RESULT_SYSTEM_PROMPT, final_prompt))
             reply = (final.message.content or "").strip()
         else:
-            # 没有工具调用，尝试用 text-to-sql 补充
-            sql_result = await _await_sql()
+            # 没有工具调用 → 尝试 text-to-sql 作为读操作补充
+            sql_result = ""
+            try:
+                sql_result = await asyncio.to_thread(run_text_to_sql, req.message)
+            except Exception as e:
+                logger.warning("text-to-sql 异常: %s", str(e))
             if sql_result:
                 reply = reply_text + "\n\n" + sql_result
             else:
