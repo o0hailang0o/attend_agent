@@ -126,13 +126,17 @@ def _execute_sql(sql: str) -> str:
 
 def text_to_sql(query: str) -> str:
     """执行 text-to-sql 流程：LLM 生成 SQL → 执行 → 返回结果"""
+    logger.info("text_to_sql 开始处理: %s", query)
     try:
         sql = _generate_sql(query)
         if not sql:
+            logger.info("text_to_sql 未生成 SQL，跳过")
             return ""
         result = _execute_sql(sql)
         if not result:
+            logger.info("text_to_sql SQL 执行无结果，跳过")
             return ""
+        logger.info("text_to_sql 完成，返回 %d 字符", len(result))
         return f"【数据库查询结果】\nSQL: {sql}\n\n{result}"
     except Exception as e:
         logger.warning("text_to_sql 整体异常: %s", str(e))

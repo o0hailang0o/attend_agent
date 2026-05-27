@@ -173,6 +173,7 @@ async def chat(req: ChatRequest):
             sql_result = ""
         if isinstance(sql_result, BaseException):
             sql_result = ""
+        logger.info("text-to-sql 结果 (%s): %s", "有数据" if sql_result else "为空", sql_result[:100] if sql_result else "")
 
         # ---- 合成最终回复 ----
         if tool_calls:
@@ -195,8 +196,12 @@ async def chat(req: ChatRequest):
                     await save_message(user_uuid, "assistant", r)
 
             final_prompt = TOOL_RESULT_PROMPT.format(question=req.message, results="\n".join(all_results))
-            final = master_llm.chat(_build_messages(history, RESULT_SYSTEM_PROMPT, final_prompt))
-            reply = (final.message.content or "").strip()
+            try:
+                final = master_llm.chat(_build_messages(history, RESULT_SYSTEM_PROMPT, final_prompt))
+                reply = (final.message.content or "").strip()
+            except Exception as e:
+                logger.error("master_llm 合成失败: %s", e)
+                reply = fc_reply or ""
         else:
             reply = fc_reply
             if sql_result:
