@@ -1,4 +1,4 @@
-import logging, json
+import logging, json, asyncio
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -122,29 +122,37 @@ async def chat(req: ChatRequest):
 
         master_llm = get_llm()
 
-        # ---- function calling ----
-        local_llm = get_llm()
-        r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
-        text = (r.message.content or "").strip()
-        tcs = _parse_tool_calls(text)
-        res_list = []
-        cal_list = []
-        new_pending = None
-        for tc in tcs:
-            name = tc.get("tool", "")
-            params = tc.get("params", {})
-            result = _execute_tool(name, params)
-            cal_list.append(f"[{name}] {result}")
-            res_list.append(f"工具【{name}】结果: {result}")
-            if result.strip().startswith("还需要提供以下信息"):
-                missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
-                missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
-                new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
+        # ---- function calling（线程池异步，不阻塞事件循环） ----
+        def _run_function_calling():
+            local_llm = get_llm()
+            r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
+            text = (r.message.content or "").strip()
+            tcs = _parse_tool_calls(text)
+            res_list = []
+            cal_list = []
+            new_pending = None
+            for tc in tcs:
+                name = tc.get("tool", "")
+                params = tc.get("params", {})
+                result = _execute_tool(name, params)
+                cal_list.append(f"[{name}] {result}")
+                res_list.append(f"工具【{name}】结果: {result}")
+                if result.strip().startswith("还需要提供以下信息"):
+                    missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
+                    missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
+                    new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
+            return text, tcs, res_list, cal_list, new_pending
 
-        fc_reply = text
-        tool_calls = tcs
-        results = res_list
-        called = cal_list
+        try:
+            fc_reply, tool_calls, results, called, new_pending = await asyncio.wait_for(
+                asyncio.to_thread(_run_function_calling), timeout=35
+            )
+        except asyncio.TimeoutError:
+            logger.error("function_calling 超时（35秒）")
+            return ChatResponse(reply="系统处理超时，请稍后再试")
+        except Exception as e:
+            logger.error("function_calling 异常: %s", e)
+            return ChatResponse(reply="系统处理出错，请稍后再试")
 
         if new_pending:
             pending_tool_call.set(new_pending)
