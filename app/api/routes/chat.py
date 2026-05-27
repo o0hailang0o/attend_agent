@@ -10,7 +10,7 @@ from app.core.prompts import SYSTEM_PROMPT, RESULT_SYSTEM_PROMPT, TOOL_RESULT_PR
 from app.services.function_calling import get_available_tools
 from app.services.chat_memory import load_history, save_message
 from app.services import agent_service
-from app.context import auth_token, current_user_uuid
+from app.context import auth_token, current_user_uuid, pending_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +81,22 @@ def _execute_tool(name: str, params: dict) -> str:
     return f"未找到工具: {name}"
 
 
-def _build_messages(history: list[dict], system: str, user_msg: str) -> list[ChatMessage]:
+def _build_messages(history: list[dict], system: str, user_msg: str, pending: dict | None = None) -> list[ChatMessage]:
     msgs = [ChatMessage(role=MessageRole.SYSTEM, content=system)]
     for h in history:
         if h.get("role") == "user":
             msgs.append(ChatMessage(role=MessageRole.USER, content=h["content"]))
         elif h.get("role") == "assistant":
             msgs.append(ChatMessage(role=MessageRole.ASSISTANT, content=h["content"]))
+    # 如果有等待续接的工具调用，追加一条系统指令帮助 LLM 理解上下文
+    if pending:
+        pending_msg = (
+            "【系统指令】你刚才正在为用户办理请假，已经收集了部分参数，但缺少以下信息："
+            f"{pending.get('missing_text', '')}。"
+            "用户现在提供了新的输入。如果用户的输入是缺失的某项参数值，你必须立即再次调用 register_leave，"
+            "将之前已知的参数和用户新提供的参数一起传入，不要使用你的内部知识回答用户。"
+        )
+        msgs.append(ChatMessage(role=MessageRole.SYSTEM, content=pending_msg))
     msgs.append(ChatMessage(role=MessageRole.USER, content=user_msg))
     return msgs
 
@@ -105,8 +114,12 @@ async def chat(req: ChatRequest):
         else:
             history = await load_history(user_uuid)
 
+        # 读取并清除等待续接的工具调用
+        pending = pending_tool_call.get()
+        pending_tool_call.set(None)
+
         llm = get_llm()
-        r = llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message))
+        r = llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
         reply_text = (r.message.content or "").strip()
 
         called = []
@@ -120,6 +133,18 @@ async def chat(req: ChatRequest):
                 result = _execute_tool(name, params)
                 called.append(f"[{name}] {result}")
                 results.append(f"工具【{name}】结果: {result}")
+
+                # 如果工具返回"还缺参数"，保存续接状态
+                if result.strip().startswith("还需要提供以下信息"):
+                    # 提取列举了哪些缺失项
+                    missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
+                    missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
+                    pending_tool_call.set({
+                        "tool": name,
+                        "params": params,
+                        "missing_text": missing_text,
+                        "result": result,
+                    })
 
             # 将工具调用信息存入历史，供下一轮 LLM 参考
             for tc in tool_calls:
