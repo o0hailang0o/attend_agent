@@ -1,4 +1,4 @@
-import logging, json, asyncio
+import logging, json
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -11,7 +11,6 @@ from app.services.function_calling import get_available_tools
 from app.services.chat_memory import load_history, save_message
 from app.services import agent_service
 from app.context import auth_token, current_user_uuid, pending_tool_call
-from app.services.text_to_sql import text_to_sql as run_text_to_sql
 
 logger = logging.getLogger(__name__)
 
@@ -123,65 +122,36 @@ async def chat(req: ChatRequest):
 
         master_llm = get_llm()
 
-        # ---- 两个线程并行（asyncio.gather 实现类似 Java join） ----
-        def _run_function_calling():
-            """线程中执行：LLM 调用 + 工具执行，返回结果"""
-            local_llm = get_llm()
-            r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
-            text = (r.message.content or "").strip()
-            tcs = _parse_tool_calls(text)
-            res_list = []
-            cal_list = []
-            new_pending = None
-            for tc in tcs:
-                name = tc.get("tool", "")
-                params = tc.get("params", {})
-                result = _execute_tool(name, params)
-                cal_list.append(f"[{name}] {result}")
-                res_list.append(f"工具【{name}】结果: {result}")
-                if result.strip().startswith("还需要提供以下信息"):
-                    missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
-                    missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
-                    new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
-            return text, tcs, res_list, cal_list, new_pending
+        # ---- function calling ----
+        local_llm = get_llm()
+        r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
+        text = (r.message.content or "").strip()
+        tcs = _parse_tool_calls(text)
+        res_list = []
+        cal_list = []
+        new_pending = None
+        for tc in tcs:
+            name = tc.get("tool", "")
+            params = tc.get("params", {})
+            result = _execute_tool(name, params)
+            cal_list.append(f"[{name}] {result}")
+            res_list.append(f"工具【{name}】结果: {result}")
+            if result.strip().startswith("还需要提供以下信息"):
+                missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
+                missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
+                new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
 
-        fc_task = asyncio.create_task(asyncio.to_thread(_run_function_calling))
-        sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message, user_uuid))
-
-        fc_result = None
-        sql_result = ""
-        try:
-            fc_result = await asyncio.wait_for(fc_task, timeout=35)
-        except asyncio.TimeoutError:
-            logger.error("function_calling 超时（35秒）")
-            return ChatResponse(reply="系统处理超时，请稍后再试")
-        except Exception as e:
-            logger.error("function_calling 异常: %s", e)
-            return ChatResponse(reply="系统处理出错，请稍后再试")
-
-        fc_reply, tool_calls, results, called, new_pending = fc_result
+        fc_reply = text
+        tool_calls = tcs
+        results = res_list
+        called = cal_list
 
         if new_pending:
             pending_tool_call.set(new_pending)
 
-        # text-to-sql 已在后台并行运行，给它额外时间完成
-        try:
-            sql_result = await asyncio.wait_for(sql_task, timeout=10)
-        except asyncio.TimeoutError:
-            logger.info("text-to-sql 超过 10 秒未完成，跳过")
-            sql_result = ""
-        except Exception as e:
-            logger.warning("text-to-sql 异常: %s", e)
-            sql_result = ""
-        if isinstance(sql_result, BaseException):
-            sql_result = ""
-        logger.info("text-to-sql 结果 (%s): %s", "有数据" if sql_result else "为空", sql_result[:100] if sql_result else "")
-
         # ---- 合成最终回复 ----
         if tool_calls:
             all_results = list(results)
-            if sql_result:
-                all_results.append(sql_result)
 
             for tc in tool_calls:
                 name = tc.get("tool", "")
@@ -206,8 +176,6 @@ async def chat(req: ChatRequest):
                 reply = fc_reply or ""
         else:
             reply = fc_reply
-            if sql_result:
-                reply += "\n\n" + sql_result
 
         if not reply:
             reply = _mock_chat(req.message)
