@@ -210,6 +210,7 @@ async def chat(req: ChatRequest):
         if not reply:
             reply = _mock_chat(req.message)
 
+        logger.info("准备保存消息: session_id=%s, user_uuid=%s, reply_len=%d", session_id, user_uuid, len(reply) if reply else 0)
         if session_id:
             agent_service.save_message(session_id, "user", req.message)
             agent_service.save_message(session_id, "assistant", reply)

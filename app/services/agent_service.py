@@ -136,27 +136,32 @@ def load_history(session_id: str) -> list[dict]:
 
 
 def save_message(session_id: str, role: str, content: str, title: str = None):
+    logger.info("save_message(session=%s, role=%s, content_len=%d)", session_id, role, len(content) if content else 0)
+    db = None
     try:
         db = SessionLocal()
-        try:
-            msg = Message(session_id=session_id, role=role, content=content, title=title)
-            db.add(msg)
-            # 自动用第一条用户消息设置 session 标题
-            if role == "user":
-                existing = db.query(Message).filter(
-                    Message.session_id == session_id, Message.role == "user"
-                ).count()
-                if existing == 0:
-                    auto_title = content[:50] + ("..." if len(content) > 50 else "")
-                    db.query(Session).filter(Session.id == session_id).update(
-                        {"title": auto_title, "updated_at": datetime.now()}
-                    )
-            else:
+        msg = Message(session_id=session_id, role=role, content=content, title=title)
+        db.add(msg)
+        # 自动用第一条用户消息设置 session 标题
+        if role == "user":
+            existing = db.query(Message).filter(
+                Message.session_id == session_id, Message.role == "user"
+            ).count()
+            if existing == 0:
+                auto_title = content[:50] + ("..." if len(content) > 50 else "")
                 db.query(Session).filter(Session.id == session_id).update(
-                    {"updated_at": datetime.now()}
+                    {"title": auto_title, "updated_at": datetime.now()}
                 )
-            db.commit()
-        finally:
-            db.close()
+        else:
+            db.query(Session).filter(Session.id == session_id).update(
+                {"updated_at": datetime.now()}
+            )
+        db.commit()
+        logger.info("save_message 成功")
     except Exception as e:
-        logger.warning("Failed to save message: %s", e)
+        logger.error("save_message 失败: %s", e)
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        if db:
+            db.close()
