@@ -2,7 +2,7 @@ import logging
 import json
 import traceback
 from llama_index.core.llms import ChatMessage, MessageRole
-from app.core.llama_index import get_llm
+from app.core.llama_index import get_text_to_sql_llm
 from app.core.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ SQL："""
 def _generate_sql(query: str) -> str:
     """使用 LLM 将自然语言转为 SQL"""
     try:
-        llm = get_llm()
+        llm = get_text_to_sql_llm()
         prompt = SQL_GENERATION_PROMPT.format(query=query)
         msg = ChatMessage(role=MessageRole.USER, content=SCHEMA_DESCRIPTION + "\n\n" + prompt)
         r = llm.chat(messages=[msg])
