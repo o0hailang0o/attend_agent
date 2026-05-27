@@ -147,22 +147,27 @@ async def chat(req: ChatRequest):
         sql_task = asyncio.create_task(asyncio.to_thread(run_text_to_sql, req.message))
 
         fc_result = None
-        sql_result = None
+        sql_result = ""
         try:
-            fc_result, sql_result = await asyncio.wait_for(
-                asyncio.gather(fc_task, sql_task, return_exceptions=True),
-                timeout=30,
-            )
+            fc_result = await asyncio.wait_for(fc_task, timeout=35)
         except asyncio.TimeoutError:
-            logger.warning("gather 超时（30秒）")
-        # 处理线程内的异常
-        if isinstance(fc_result, Exception):
-            logger.error("function_calling 异常: %s", fc_result)
-            raise fc_result
+            logger.error("function_calling 超时（35秒）")
+            return ChatResponse(reply="系统处理超时，请稍后再试")
+        except Exception as e:
+            logger.error("function_calling 异常: %s", e)
+            return ChatResponse(reply="系统处理出错，请稍后再试")
+
         fc_reply, tool_calls, results, called, new_pending = fc_result
-        if isinstance(sql_result, Exception):
-            logger.warning("text-to-sql 异常: %s", sql_result)
-            sql_result = ""
+
+        if sql_task.done():
+            try:
+                sql_result = sql_task.result() or ""
+            except Exception as e:
+                logger.warning("text-to-sql 异常: %s", e)
+                sql_result = ""
+            if isinstance(sql_result, BaseException):
+                sql_result = ""
+
         if new_pending:
             pending_tool_call.set(new_pending)
 
