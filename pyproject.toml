@@ -3,6 +3,7 @@ name = "attend_agent"
 version = "0.1.0"
 description = "企业考勤智能助手"
 authors = ["Your Name <your.email@example.com>"]
+packages = [{ include = "attend_agent" }]  # <--- 加这一行
 
 [tool.poetry.dependencies]
 python = "^3.11"
