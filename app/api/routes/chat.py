@@ -10,7 +10,7 @@ from app.core.prompts import SYSTEM_PROMPT, RESULT_SYSTEM_PROMPT, TOOL_RESULT_PR
 from app.services.function_calling import get_available_tools
 from app.services.chat_memory import load_history, save_message
 from app.services import agent_service
-from app.context import auth_token, current_user_uuid, pending_tool_call
+from app.context import auth_token, current_user_uuid, get_pending, set_pending
 from app.services.text_to_sql import text_to_sql as run_text_to_sql
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,52 @@ def _build_messages(history: list[dict], system: str, user_msg: str, pending: di
     return msgs
 
 
+def _handle_pending(pending: dict, user_msg: str) -> tuple[str, dict | None, list[str]]:
+    """存在未完成的工具调用时，直接将用户输入合并到缺失参数中，绕过 LLM。
+
+    必填参数依次为 leave_type, range, reason, leader，按顺序填入用户输入。
+    返回: (tool_result, new_pending_or_none, [call_summary_str])
+    """
+    tool_name = pending["tool"]
+    prev_params = dict(pending.get("params", {}))
+
+    # 如果是确认等待状态，用户说"确认/提交/是的/可以"等 → 直接提交
+    if pending.get("status") == "confirming":
+        confirming_keywords = ["确认", "提交", "是的", "可以", "好", "行", "对", "没错", "ok", "yes", "确定"]
+        user_lower = user_msg.strip().lower()
+        if any(kw in user_lower for kw in confirming_keywords):
+            prev_params["confirmed"] = True
+            result = _execute_tool(tool_name, prev_params)
+            return result, None, [f"[{tool_name}] {result}"]
+        else:
+            # 用户说了别的内容，取消确认等待，交给 LLM
+            return pending.get("result", ""), None, []
+
+    user_input = user_msg.strip()
+
+    for param_name in ["leave_type", "range", "reason", "leader"]:
+        if not prev_params.get(param_name):
+            prev_params[param_name] = user_input
+            break
+
+    result = _execute_tool(tool_name, prev_params)
+    call_summary = f"[{tool_name}] {result}"
+
+    new_pending = None
+    if result.strip().startswith("还需要提供以下信息"):
+        missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
+        missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
+        new_pending = {"tool": tool_name, "params": prev_params, "missing_text": missing_text, "result": result}
+    elif result.strip().startswith("请假单确认"):
+        # 参数齐全，等待用户确认 → 保存完整参数以便确认时直接提交
+        new_pending = {"tool": tool_name, "params": prev_params, "result": result, "status": "confirming"}
+
+    return result, new_pending, [call_summary]
+
+
+_PENDING_TOOLS = {"register_leave"}
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not settings.llm_api_key:
@@ -118,78 +164,74 @@ async def chat(req: ChatRequest):
             history = await load_history(user_uuid)
 
         # 读取并清除等待续接的工具调用
-        pending = pending_tool_call.get()
-        pending_tool_call.set(None)
+        pending = get_pending(user_uuid)
 
         master_llm = get_llm()
 
-        # ---- function calling + text_to_sql 并行 ----
-        def _run_function_calling():
-            local_llm = get_llm()
-            r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
-            text = (r.message.content or "").strip()
-            tcs = _parse_tool_calls(text)
-            res_list = []
-            cal_list = []
-            new_pending = None
-            for tc in tcs:
-                name = tc.get("tool", "")
-                params = tc.get("params", {})
-                result = _execute_tool(name, params)
-                cal_list.append(f"[{name}] {result}")
-                res_list.append(f"工具【{name}】结果: {result}")
-                if result.strip().startswith("还需要提供以下信息"):
-                    missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
-                    missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
-                    new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
-            return text, tcs, res_list, cal_list, new_pending
+        # ---- function calling 与 text_to_sql 并行 ----
+        new_pending = None
 
-        fc_task = asyncio.to_thread(_run_function_calling)
-        sql_task = asyncio.to_thread(run_text_to_sql, req.message, user_uuid)
-
-        sql_result = ""
-        try:
-            fc_reply, tool_calls, results, called, new_pending = await asyncio.wait_for(fc_task, timeout=60)
-        except asyncio.TimeoutError:
-            logger.error("function_calling 超时")
-            return ChatResponse(reply="系统处理超时，请稍后再试")
-        except Exception as e:
-            logger.error("function_calling 异常: %s", e)
-            return ChatResponse(reply="系统处理出错，请稍后再试")
-
-        # fc_task 完成后，等 sql_task 最多 10 秒
-        try:
-            sql_result = await asyncio.wait_for(sql_task, timeout=10)
-        except asyncio.TimeoutError:
-            logger.info("text-to-sql 超过 10 秒未完成，跳过")
-        except Exception as e:
-            logger.warning("text-to-sql 异常: %s", e)
-        if isinstance(sql_result, BaseException):
+        if pending and pending.get("tool") in _PENDING_TOOLS:
+            # 请假流程中，跳过 text_to_sql，只处理参数续接
             sql_result = ""
-        logger.info("text-to-sql 结果: %s", "有数据" if sql_result else "为空")
+            try:
+                fc_reply, new_pending, called = _handle_pending(pending, req.message)
+                tool_calls = []
+                results = [fc_reply]
+            except Exception as e:
+                logger.error("_handle_pending 异常: %s", e)
+                fc_reply = "抱歉，系统处理请求时遇到问题，请稍后重试。"
+                tool_calls = []
+                results = []
+                called = []
+        else:
+            sql_task = asyncio.to_thread(run_text_to_sql, req.message, user_uuid)
+            try:
+                local_llm = get_llm()
+                r = local_llm.chat(_build_messages(history, SYSTEM_PROMPT, req.message, pending))
+                text = (r.message.content or "").strip()
+                tcs = _parse_tool_calls(text)
+                res_list = []
+                cal_list = []
+                for tc in tcs:
+                    name = tc.get("tool", "")
+                    params = tc.get("params", {})
+                    try:
+                        result = _execute_tool(name, params)
+                    except Exception as e:
+                        logger.warning("工具 %s 执行异常: %s", name, e)
+                        result = f"工具 {name} 执行出错: {e}"
+                    cal_list.append(f"[{name}] {result}")
+                    res_list.append(f"工具【{name}】结果: {result}")
+                    if result.strip().startswith("还需要提供以下信息"):
+                        missing_lines = [l.strip().lstrip("- ") for l in result.split("\n") if l.strip().startswith("-")]
+                        missing_text = "、".join(missing_lines) if missing_lines else "部分参数"
+                        new_pending = {"tool": name, "params": params, "missing_text": missing_text, "result": result}
+                fc_reply, tool_calls, results, called = text, tcs, res_list, cal_list
+            except Exception as e:
+                logger.error("function_calling 异常: %s", e)
+                fc_reply = "抱歉，系统处理请求时遇到问题，请稍后重试。"
+                tool_calls = []
+                results = []
+                called = []
+
+            sql_result = ""
+            try:
+                sql_result = await sql_task
+            except Exception as e:
+                logger.warning("text-to-sql 异常: %s", e)
+            if isinstance(sql_result, BaseException):
+                sql_result = ""
+            logger.info("text-to-sql 结果: %s", "有数据" if sql_result else "为空")
 
         if new_pending:
-            pending_tool_call.set(new_pending)
+            set_pending(user_uuid, new_pending)
 
         # ---- 合成最终回复 ----
-        if tool_calls:
+        if tool_calls or sql_result:
             all_results = list(results)
             if sql_result:
                 all_results.append(sql_result)
-
-            for tc in tool_calls:
-                name = tc.get("tool", "")
-                params = tc.get("params", {})
-                record = f"【系统调用工具】{name}，参数：{json.dumps(params, ensure_ascii=False)}"
-                if session_id:
-                    agent_service.save_message(session_id, "assistant", record)
-                else:
-                    await save_message(user_uuid, "assistant", record)
-            for r in all_results:
-                if session_id:
-                    agent_service.save_message(session_id, "assistant", r)
-                else:
-                    await save_message(user_uuid, "assistant", r)
 
             final_prompt = TOOL_RESULT_PROMPT.format(question=req.message, results="\n".join(all_results))
             try:
@@ -200,8 +242,6 @@ async def chat(req: ChatRequest):
                 reply = fc_reply or ""
         else:
             reply = fc_reply
-            if sql_result:
-                reply += "\n\n" + sql_result
 
         if not reply:
             reply = _mock_chat(req.message)

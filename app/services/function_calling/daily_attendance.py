@@ -7,7 +7,7 @@ from app.utils.date_converter import DateConverter
 
 logger = logging.getLogger(__name__)
 
-def get_employee_attendance(employee_identifier: str, date: str) -> str:
+def get_employee_attendance(employee_identifier: str = "", date: str = "") -> str:
     """查询单个员工某天的考勤记录（上班时间、下班时间、实际工时、考勤状态等）
 
     调用 attend 接口 GET /dailyAttendance?employeeUuid={uuid}&date={date}，
@@ -67,7 +67,7 @@ def get_employee_attendance(employee_identifier: str, date: str) -> str:
         logger.error("get_employee_attendance 出错: %s", str(e))
         return "抱歉，查询考勤记录时系统繁忙，请稍后重试。"
 
-def get_attendance_summary(date: str) -> str:
+def get_attendance_summary(date: str = "") -> str:
     """查询某天全体出勤汇总（出勤率、迟到、缺勤等统计）
 
     调用 attend 接口 GET /dailyAttendance?date={date}，
@@ -113,7 +113,7 @@ def get_attendance_summary(date: str) -> str:
         logger.error("get_attendance_summary 出错: %s", str(e))
         return "抱歉，查询考勤汇总时系统繁忙，请稍后重试。"
 
-def get_overtime_records(employee_identifier: str, start_date: str, end_date: str) -> str:
+def get_overtime_records(employee_identifier: str = "", start_date: str = "", end_date: str = "") -> str:
     """查询员工在日期范围内的加班记录（实际工时 > 8 小时）
 
     调用 attend 接口 GET /dailyAttendance?employeeUuid={uuid}&startDate={s}&endDate={e}，

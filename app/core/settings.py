@@ -39,6 +39,7 @@ def _load_yaml_settings() -> dict:
     flat["attend_base_url"] = attend.get("base-url", "http://192.168.31.100:8080")
 
     t2s = raw.get("text-to-sql-llm", {})
+    flat["text_to_sql_llm_provider"] = t2s.get("provider", "zhipu")
     flat["text_to_sql_llm_api_key"] = t2s.get("api-key", "")
     flat["text_to_sql_llm_model"] = t2s.get("model", "glm-4-flash")
     flat["text_to_sql_llm_api_base"] = t2s.get("api-base", "https://open.bigmodel.cn/api/paas/v4/")
@@ -62,6 +63,7 @@ class Settings(BaseSettings):
 
     attend_base_url: str = "http://localhost:8080"
 
+    text_to_sql_llm_provider: str = "zhipu"
     text_to_sql_llm_api_key: str = ""
     text_to_sql_llm_model: str = "glm-4-flash"
     text_to_sql_llm_api_base: str = "https://open.bigmodel.cn/api/paas/v4/"

@@ -7,7 +7,7 @@ from app.utils.user_lookup import resolve_user
 logger = logging.getLogger(__name__)
 
 
-def get_leave_balance(employee_identifier: str) -> str:
+def get_leave_balance(employee_identifier: str = "") -> str:
     """获取员工年假和调休假（公休假）余额
 
     调用 attend 接口 GET /leaveBalance/byUser?userUuid={uuid}，

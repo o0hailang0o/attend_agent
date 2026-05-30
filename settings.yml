@@ -14,5 +14,11 @@ llm:
   model: "GLM-4.5-Air"
   api-base: "https://open.bigmodel.cn/api/paas/v4/"
 
+text-to-sql-llm:
+  provider: "deepseek"
+  api-key: "sk-b7e5de0931294d0baeb387b9ac493419"
+  model: "deepseek-v4-flash"
+  api-base: "https://api.deepseek.com"
+
 attend:
   base-url: "http://localhost:8080"

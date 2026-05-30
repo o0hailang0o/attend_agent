@@ -47,14 +47,19 @@ def create_session(user_uuid: str, title: str = "新对话") -> dict | None:
             )
             db.add(session)
             db.commit()
-            return {
-                "id": session.id,
-                "title": session.title,
-                "created_at": session.created_at.isoformat() if session.created_at else None,
-                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-            }
+            session_id = session.id
         finally:
             db.close()
+
+        # 添加初始助手欢迎消息
+        save_message(session_id, "assistant", "你好！我是考勤小助手，有什么可以帮你的吗？")
+
+        return {
+            "id": session_id,
+            "title": title,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        }
     except Exception as e:
         logger.warning("Failed to create session: %s", e)
         return None
