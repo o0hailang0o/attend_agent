@@ -3,6 +3,7 @@ from typing import List, Optional
 from llama_index.core.tools import FunctionTool
 from app.services.attend_api.approve import ApproveController
 from app.utils.user_lookup import resolve_user
+from app.utils.attend_code_converter import LeaveTypeConverter
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,10 @@ def approve_list(employee_identifier: str = "") -> str:
             return f"{thinking}\n目前没有待审批的申请。"
 
         lines = "\n".join(
-            f"- {r.get('applyUserName', '未知')} | {r.get('type', '未知')} "
+            f"- {r.get('applyUserName', '未知')} | {LeaveTypeConverter.to_name(r.get('type', 0))} "
             f"| {r.get('startTime', '未知')}~{r.get('endTime', '未知')} "
-            f"| {r.get('approveStatusName', '未知')}"
+            f"| {r.get('reason', '') or '-'}"
+            f" | {r.get('approveStatusName', '未知')}"
             for r in records
         )
         return f"{thinking}\n待审批列表（共 {len(records)} 条）:\n{lines}"

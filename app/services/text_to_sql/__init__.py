@@ -91,7 +91,11 @@ SCHEMA_DESCRIPTION = """
 SQL_GENERATION_PROMPT = """你是考勤系统的 SQL 专家。根据以上数据库表结构，将用户问题转换为 MySQL 查询。
 
 重要：你只能生成 SELECT 查询，不允许任何写操作。
-如果用户问题涉及请假申请、审批、提交、修改、删除等写操作，直接输出 SKIP。
+如果用户问题符合以下任一情况，直接输出 SKIP：
+- 涉及请假申请、审批、提交、修改、删除等写操作
+- 与考勤数据完全无关（如：今天几号、今天星期几、天气、闲聊、你是谁等）
+- 是纯日期/时间询问，不涉及任何考勤业务数据
+- 无法从上述数据库表中查到答案
 
 要求：
 1. 只输出一条 SELECT 语句，不要输出任何其他内容
@@ -177,7 +181,7 @@ def text_to_sql(query: str, user_uuid: str = None) -> str:
             logger.info("text_to_sql SQL 执行无结果，跳过")
             return ""
         logger.info("text_to_sql 完成，返回 %d 字符", len(result))
-        return f"【数据库查询结果】\n{result}"
+        return result
     except Exception as e:
         logger.warning("text_to_sql 整体异常: %s", str(e))
         return ""

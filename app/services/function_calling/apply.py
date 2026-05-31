@@ -3,6 +3,7 @@ from llama_index.core.tools import FunctionTool
 from app.services.attend_api.apply import ApplyController, map_leave_type
 from app.utils.user_lookup import resolve_user
 from app.utils.time_converter import TimeConverter
+from app.utils.attend_code_converter import LeaveTypeConverter
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ def get_leave_applications(employee_identifier: str = "") -> str:
         for app in records:
             st = app.get('startTime', '未知')
             et = app.get('endTime', '未知')
-            tp = app.get('type', '未知')
+            tp = LeaveTypeConverter.to_name(app.get('type', 0))
             sts = app.get('statusName', '未知')
             rsn = app.get('reason', '')
             rsn_part = f"（{rsn}）" if rsn else ""

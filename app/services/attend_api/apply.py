@@ -1,22 +1,10 @@
 from typing import Dict, Any, Optional
 from .base import get_client, _to_dict
-
-
-_LEAVE_TYPE_MAP = {
-    "年假": 1,
-    "事假": 2,
-    "病假": 3,
-    "婚假": 4,
-    "产假": 5,
-    "丧假": 6,
-    "调休": 7,
-    "公休假": 7,
-}
+from app.utils.attend_code_converter import LeaveTypeConverter
 
 
 def map_leave_type(name: str) -> int:
-    """将请假类型中文名映射为 ApplyReq.type 整数值"""
-    return _LEAVE_TYPE_MAP.get(name, 2)
+    return LeaveTypeConverter.to_code(name) or 2
 
 
 class ApplyController:
