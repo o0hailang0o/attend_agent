@@ -315,6 +315,7 @@ class TimeConverter:
             )
             resp = llm.chat([ChatMessage(role=MessageRole.USER, content=prompt)])
             raw = (resp.message.content or "").strip()
+            logger.info("_llm_parse_range: 原始响应: '%s'", raw)
             start = end = None
             for line in raw.split("\n"):
                 line = line.strip()
