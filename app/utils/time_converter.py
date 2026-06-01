@@ -1,4 +1,5 @@
 import re
+import time as _time
 from datetime import time, timedelta, datetime
 from typing import Optional
 
@@ -13,6 +14,98 @@ class TimeConverter:
         "晚上": 12, "晚间": 12, "夜里": 12,
         "午夜": 0,
     }
+
+    # 模糊时段 → 默认起止时间（兜底用，优先查数据库 rule 表）
+    _PERIOD_DEFAULTS = {
+        "上午": ("09:00", "12:00"),
+        "中午": ("12:00", "14:00"),
+        "下午": ("14:00", "18:00"),
+        "晚上": ("18:00", "21:00"),
+        "全天": ("09:00", "18:00"),
+    }
+
+    # rule 缓存：user_uuid → (expiry_timestamp, periods_dict)
+    _rule_cache: dict[str, tuple[float, dict]] = {}
+    _RULE_CACHE_TTL = 300  # 5 分钟
+
+    @staticmethod
+    def _fmt_time(val) -> str:
+        """将数据库返回的时间值统一转为 HH:MM 字符串"""
+        if val is None:
+            return ""
+        if isinstance(val, time):
+            return val.strftime("%H:%M")
+        s = str(val)
+        return s[:5] if len(s) >= 5 else s
+
+    @staticmethod
+    def _get_user_rule_periods(user_uuid: str) -> dict:
+        """查询用户所属考勤规则，返回动态时段默认值。查不到时回落 _PERIOD_DEFAULTS。"""
+        if not user_uuid:
+            return TimeConverter._PERIOD_DEFAULTS
+
+        cached = TimeConverter._rule_cache.get(user_uuid)
+        if cached and cached[0] > _time.time():
+            return cached[1]
+
+        try:
+            from app.core.database import SessionLocal
+            from sqlalchemy import text
+            session = SessionLocal()
+            try:
+                user_row = session.execute(
+                    text("SELECT rule_uuid FROM sys_user WHERE uuid = :uid AND is_delete = 1"),
+                    {"uid": user_uuid}
+                ).fetchone()
+                if not user_row or not user_row[0]:
+                    return TimeConverter._PERIOD_DEFAULTS
+
+                rule_uuid = str(user_row[0])
+                rule_row = session.execute(
+                    text("SELECT start_time, end_time, middle_start, middle_end, middle_rest "
+                         "FROM rule WHERE uuid = :ruid AND is_delete = 1"),
+                    {"ruid": rule_uuid}
+                ).fetchone()
+                if not rule_row:
+                    return TimeConverter._PERIOD_DEFAULTS
+
+                start = TimeConverter._fmt_time(rule_row[0]) or "09:00"
+                end = TimeConverter._fmt_time(rule_row[1]) or "18:00"
+                m_start = TimeConverter._fmt_time(rule_row[2]) or "12:00"
+                m_end = TimeConverter._fmt_time(rule_row[3]) or "14:00"
+                has_middle = int(rule_row[4]) if rule_row[4] else 0
+
+                periods = {}
+                if has_middle:
+                    periods["上午"] = (start, m_start)
+                    periods["中午"] = (m_start, m_end)
+                    periods["下午"] = (m_end, end)
+                else:
+                    periods["上午"] = (start, "12:00")
+                    periods["下午"] = ("12:00", end)
+                periods["晚上"] = (end, "21:00")
+                periods["全天"] = (start, end)
+
+                TimeConverter._rule_cache[user_uuid] = (_time.time() + TimeConverter._RULE_CACHE_TTL, periods)
+                return periods
+            finally:
+                session.close()
+        except Exception:
+            return TimeConverter._PERIOD_DEFAULTS
+
+    @staticmethod
+    def resolve_period_range(date_str: str, time_text: str, user_uuid: str = "", fmt: str = "%Y-%m-%dT%H:%M:%S") -> tuple[Optional[str], Optional[str]]:
+        """识别模糊时段描述（如"下午请假"、"上午"）→ 补全默认起止时间（优先查数据库 rule）"""
+        from app.utils.date_converter import DateConverter
+        periods = TimeConverter._get_user_rule_periods(user_uuid)
+        for period, (def_start, def_end) in periods.items():
+            if period in time_text:
+                date_obj = DateConverter.parse_date(date_str) if date_str else None
+                if date_obj is None:
+                    return None, None
+                d = date_obj.strftime("%Y-%m-%d")
+                return f"{d}T{def_start}:00", f"{d}T{def_end}:00"
+        return None, None
 
     @staticmethod
     def parse_time(time_str: str) -> Optional[time]:
@@ -234,7 +327,7 @@ class TimeConverter:
             return None, None
 
     @staticmethod
-    def parse_natural_range(text: str, fmt: str = "%Y-%m-%dT%H:%M:%S") -> tuple[Optional[str], Optional[str]]:
+    def parse_natural_range(text: str, user_uuid: str = "", fmt: str = "%Y-%m-%dT%H:%M:%S") -> tuple[Optional[str], Optional[str]]:
         """解析完整自然语言时间范围 → ("YYYY-MM-ddTHH:mm:ss", "YYYY-MM-ddTHH:mm:ss")"""
         if not text:
             return None, None
@@ -275,6 +368,12 @@ class TimeConverter:
                 if len(space_parts) == 2:
                     start_str, end_str = space_parts[0].strip(), space_parts[1].strip()
             result = TimeConverter.parse_datetime_range(date_part, start_str, end_str, fmt=fmt)
+            if result != (None, None):
+                return result
+
+        # 模糊时段兜底（如"明天下午请假" → 根据用户所属 rule 补全时间）
+        if date_part and time_part:
+            result = TimeConverter.resolve_period_range(date_part, time_part, user_uuid=user_uuid, fmt=fmt)
             if result != (None, None):
                 return result
 

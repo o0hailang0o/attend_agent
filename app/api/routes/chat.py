@@ -1,4 +1,4 @@
-import logging, json, asyncio
+import logging, json, asyncio, re
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -73,6 +73,20 @@ def _parse_tool_calls(text: str) -> list[dict]:
     return calls
 
 
+def _clean_reply(text: str) -> str:
+    """清洗回复中的技术细节：移除 TOOL_CALL 行、tool_call 标签等"""
+    import re
+    # 移除 TOOL_CALL: 行
+    text = re.sub(r"TOOL_CALL:\s*\{[^}]*\}", "", text)
+    # 移除 <tool_call>...</tool_call>
+    text = re.sub(r"<tool_call>[^<]*</tool_call>", "", text)
+    # 移除 <function_call>...</function_call>
+    text = re.sub(r"<function_call>[^<]*</function_call>", "", text)
+    # 清理多余空行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _execute_tool(name: str, params: dict) -> str:
     tools = {t.metadata.name: t for t in get_available_tools()}
     if name in tools:
@@ -127,10 +141,17 @@ def _handle_pending(pending: dict, user_msg: str) -> tuple[str, dict | None, lis
 
     user_input = user_msg.strip()
 
-    for param_name in ["leave_type", "range", "reason", "leader"]:
-        if not prev_params.get(param_name):
-            prev_params[param_name] = user_input
-            break
+    # 拆分用户输入中的多个值（支持中英文逗号/顿号分隔），依次填入缺失参数
+    parts = [p.strip() for p in re.split(r'[，,、]', user_input) if p.strip()]
+    missing_params = [p for p in ["leave_type", "range", "reason", "leader"] if not prev_params.get(p)]
+    if parts:
+        for i, param_name in enumerate(missing_params):
+            if i < len(parts):
+                prev_params[param_name] = parts[i]
+            else:
+                break
+    elif missing_params:
+        prev_params[missing_params[0]] = user_input
 
     result = _execute_tool(tool_name, prev_params)
     call_summary = f"[{tool_name}] {result}"
@@ -176,7 +197,8 @@ async def chat(req: ChatRequest):
             sql_result = ""
             try:
                 fc_reply, new_pending, called = _handle_pending(pending, req.message)
-                tool_calls = []
+                # 让结果也走 master LLM 合成，避免泄露原始工具输出，同时保持自然对话
+                tool_calls = called
                 results = [fc_reply]
             except Exception as e:
                 logger.error("_handle_pending 异常: %s", e)
@@ -245,6 +267,8 @@ async def chat(req: ChatRequest):
 
         if not reply:
             reply = _mock_chat(req.message)
+
+        reply = _clean_reply(reply)
 
         logger.info("准备保存消息: session_id=%s, user_uuid=%s, reply_len=%d", session_id, user_uuid, len(reply) if reply else 0)
         if session_id:

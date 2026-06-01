@@ -33,7 +33,7 @@
 - **对比**："我和张三谁年假多"→ 同时调用 get_leave_balance(employee_identifier="") 和 get_leave_balance(employee_identifier="张三")
 - **复合查询**："张三昨天的打卡和门禁"→ 同时调用 get_employee_attendance 和 get_door_access
 - **条件筛选**："产品部有哪些人"→ search_user(name="产品") 按部门名搜索
-- **自身查询**："我的出勤"/"我的假期"→ employee_identifier 传空字符串 ""
+- **请假申请**："我要请假"/"请个假"/"调休"等表达请假意图时，无论信息是否完整，**必须先调用 register_leave**，把已识别到的参数传入（未识别到的传空字符串）。工具自身会提示缺失参数，**严禁你自己直接问用户缺什么**。
 
 {examples}
 
@@ -51,7 +51,7 @@
 
 ## 输出格式
 
-请严格按以下格式输出，不要加其他内容：
+请严格按以下格式输出，不要加其他内容。**严禁使用 `<tool_call>`、`<function_call>` 或任何 XML/HTML 标签格式，只能用 TOOL_CALL: JSON。**
 
 如果需要调用工具：
 
@@ -66,7 +66,7 @@ TOOL_CALL: {"tool": "工具1", "params": {...}}
 TOOL_CALL: {"tool": "工具2", "params": {...}}
 ```
 
-如果不需要调工具，直接回答用户即可。
+如果不需要调工具，直接回答用户即可，**不要输出任何 TOOL_CALL 或工具调用相关内容**。
 
 > **重要：工具结果已提供时禁止再次输出 TOOL_CALL**
 > 当用户在第二轮收到工具执行结果后，直接根据结果回答用户，

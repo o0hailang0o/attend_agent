@@ -4,6 +4,7 @@ from app.services.attend_api.apply import ApplyController, map_leave_type
 from app.utils.user_lookup import resolve_user
 from app.utils.time_converter import TimeConverter
 from app.utils.attend_code_converter import LeaveTypeConverter
+from app.context import current_user_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def register_leave(
 
     # 解析时间范围
     
-    start_str, end_str = TimeConverter.parse_natural_range(range)
+    start_str, end_str = TimeConverter.parse_natural_range(range, user_uuid=current_user_uuid.get())
     if not start_str:
         return f"未能解析请假时间「{range}」，请重新描述（如下周一 上午9点到下午5点）。"
     if not end_str:
