@@ -77,6 +77,7 @@ class DateConverter:
         WEEK_OFFSETS = {
             "本周": 0, "这周": 0, "上周": -1, "下周": 1, "下下周": 2, "大下周": 2,
             "本周末": 0, "这周末": 0, "上周末": -1, "下周末": 1,
+            "这个礼拜": 0, "这礼拜": 0, "上个礼拜": -1, "下个礼拜": 1,
         }
         if date_str in WEEK_OFFSETS:
             offset = WEEK_OFFSETS[date_str]
@@ -101,7 +102,8 @@ class DateConverter:
         
         # 处理星期
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日",
+                         "礼拜一", "礼拜二", "礼拜三", "礼拜四", "礼拜五", "礼拜六", "礼拜日"]
         
         if date_str in weekdays or date_str in weekday_names:
             target_weekday = weekdays.index(date_str) if date_str in weekdays else weekday_names.index(date_str)
