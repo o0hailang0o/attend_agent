@@ -101,8 +101,10 @@ class TimeConverter:
         """识别模糊时段描述（如"下午请假"、"上午"）→ 补全默认起止时间（优先查数据库 rule）"""
         from app.utils.date_converter import DateConverter
         periods = TimeConverter._get_user_rule_periods(user_uuid)
+        # "一天" → "全天"
+        resolved_text = time_text.replace("一天", "全天")
         for period, (def_start, def_end) in periods.items():
-            if period in time_text:
+            if period in resolved_text:
                 date_obj = DateConverter.parse_date(date_str) if date_str else None
                 if date_obj is None:
                     return None, None
@@ -311,6 +313,16 @@ class TimeConverter:
                 "只返回两行，不要任何解释：\n"
                 "第一行: start=YYYY-MM-ddTHH:mm:ss\n"
                 "第二行: end=YYYY-MM-ddTHH:mm:ss（如果只有单个时间，end=空）\n\n"
+                "示例：\n"
+                "时间描述：上班一天时间\n"
+                "start=2026-06-01T09:00:00\n"
+                "end=2026-06-01T18:00:00\n\n"
+                "时间描述：这周三请假一天\n"
+                "start=2026-06-03T09:00:00\n"
+                "end=2026-06-03T18:00:00\n\n"
+                "时间描述：明天下午请假\n"
+                "start=2026-06-02T14:00:00\n"
+                "end=2026-06-02T18:00:00\n\n"
                 f"时间描述：{text}"
             )
             resp = llm.chat([ChatMessage(role=MessageRole.USER, content=prompt)])
@@ -386,6 +398,18 @@ class TimeConverter:
                 return result
 
         # 模糊时段兜底（如"明天下午请假" → 根据用户所属 rule 补全时间）
+        if date_part and time_part:
+            result = TimeConverter.resolve_period_range(date_part, time_part, user_uuid=user_uuid, fmt=fmt)
+            if result != (None, None):
+                return result
+
+        # "一天/全天" + 无明确日期 → 默认为今天全天
+        if not date_part:
+            for kw in ("一天", "全天", "整天", "上班"):
+                if kw in s:
+                    date_part = "今天"
+                    time_part = "全天"
+                    break
         if date_part and time_part:
             result = TimeConverter.resolve_period_range(date_part, time_part, user_uuid=user_uuid, fmt=fmt)
             if result != (None, None):
