@@ -1,7 +1,10 @@
+import logging
 import re
 import time as _time
 from datetime import time, timedelta, datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TimeConverter:
@@ -292,7 +295,17 @@ class TimeConverter:
             from llama_index.core.llms import ChatMessage, MessageRole
             llm = LlamaSettings.llm
             if not llm:
+                logger.warning("_llm_parse_range: LlamaSettings.llm 为 None，尝试初始化")
+                try:
+                    from app.core.llama_index import get_llm
+                    get_llm()
+                    llm = LlamaSettings.llm
+                except Exception as e:
+                    logger.error("_llm_parse_range: 初始化 LLM 失败: %s", e)
+            if not llm:
+                logger.warning("_llm_parse_range: LLM 仍不可用，返回 None")
                 return None, None
+            logger.info("_llm_parse_range: 调用 LLM 解析时间: '%s'", text)
             prompt = (
                 "你是一个时间解析工具。请将以下中文时间描述解析为起始和结束时间。\n"
                 "只返回两行，不要任何解释：\n"
@@ -384,7 +397,7 @@ class TimeConverter:
 if __name__ == '__main__':
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
-    start_str, end_str = TimeConverter.parse_natural_range(text = "上周五 下午2点43到3点46")
+    start_str, end_str = TimeConverter.parse_natural_range(text = "上班一天时间")
     print(start_str, end_str)
         
         
