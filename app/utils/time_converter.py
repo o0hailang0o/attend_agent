@@ -397,6 +397,13 @@ class TimeConverter:
 if __name__ == '__main__':
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    from app.core.llama_index import get_llm
+    try:
+        get_llm()
+        print("LLM 初始化成功")
+    except Exception as e:
+        print(f"LLM 初始化失败: {e}")
     start_str, end_str = TimeConverter.parse_natural_range(text = "上班一天时间")
     print(start_str, end_str)
         
