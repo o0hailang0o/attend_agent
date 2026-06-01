@@ -314,12 +314,12 @@ class TimeConverter:
             import datetime as _dt
             if start:
                 try:
-                    _dt.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
+                    start = _dt.datetime.strptime(start, "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%dT%H:%M:%S")
                 except ValueError:
                     start = None
             if end:
                 try:
-                    _dt.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S")
+                    end = _dt.datetime.strptime(end, "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%dT%H:%M:%S")
                 except ValueError:
                     end = None
             return start, end
