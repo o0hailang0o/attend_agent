@@ -62,6 +62,7 @@ def _parse_tool_calls(text: str) -> list[dict]:
     calls = []
     for line in text.strip().split("\n"):
         line = line.strip()
+        # TOOL_CALL: JSON 格式
         if line.startswith("TOOL_CALL:"):
             json_str = line[len("TOOL_CALL:"):].strip()
             try:
@@ -69,7 +70,30 @@ def _parse_tool_calls(text: str) -> list[dict]:
                 if isinstance(obj, dict):
                     calls.append(obj)
             except json.JSONDecodeError:
-                logger.warning("无法解析工具调用: %s", json_str)
+                logger.warning("无法解析 TOOL_CALL: %s", json_str)
+    # 兼容 <tool_call> XML 格式
+    xml_matches = re.findall(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
+    for content in xml_matches:
+        content = content.strip()
+        parts = content.split(None, 1)
+        tool_name = parts[0].strip() if parts else ""
+        params = {}
+        if len(parts) > 1:
+            rest = parts[1]
+            # <arg_X>value</arg_X>
+            for k, v in re.findall(r"<(\w+)>(.*?)</\1>", rest, re.DOTALL):
+                val = v.strip().strip('"').strip("'")
+                if val:
+                    params[k] = val
+            # key: value 兜底
+            if not params:
+                for m in re.finditer(r"(\w+)\s*[:=]\s*(.+?)(?=\s*\w+\s*[:=]|$)", rest):
+                    key = m.group(1).strip()
+                    val = m.group(2).strip().strip('"').strip("'")
+                    if val:
+                        params[key] = val
+        if tool_name and not any(c.get("tool") == tool_name for c in calls):
+            calls.append({"tool": tool_name, "params": params})
     return calls
 
 
